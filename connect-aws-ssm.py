@@ -11,16 +11,8 @@ parser = argparse.ArgumentParser(description="Provide your AWS profile")
 parser.add_argument('--profile', help='AWS profile to use')
 args = parser.parse_args()
 
-if os.environ.get('AWS_PROFILE') == None and args.profile == None:
-  print("Please provide your AWS profile either as an argument or as an environment variable.")
-  print("Example: export AWS_PROFILE=your_profile")
-  print("Example: python3 connect.py --profile your_profile")
-  exit()
-
-if args.profile == None:
-  args.profile = os.environ.get('AWS_PROFILE')
-if os.environ.get('AWS_PROFILE') == None:
-  os.environ['AWS_PROFILE'] = args.profile
+aws_profile = args.profile or os.environ.get('AWS_PROFILE')
+cmd_profile = f"--profile={aws_profile}" if aws_profile else ""
 
 def get_ec2_instances():
     try:
@@ -28,10 +20,11 @@ def get_ec2_instances():
             "aws", "ec2", "describe-instances",
             "--filter", "Name=instance-state-name,Values=running",
             "--region", "eu-central-1",
-            "--profile", args.profile,
             "--query", "Reservations[*].Instances[].{Id:InstanceId, Name:Tags[?Key=='Name'].Value|[0]} | sort_by(@, &Name)",
             "--output", "json"
         ]
+        if cmd_profile:
+            cmd.append(cmd_profile)
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         return json.loads(result.stdout)
     except subprocess.CalledProcessError as e:
@@ -55,6 +48,7 @@ def select_instance(instances):
         # print the instance name, left aligned, padded with spaces to the max_name_length with numbers 1-9 padded accordingly numbers should end with a dot .
         j=str(i+1)+"."
         print(f"{j:<3} {name:<{max_name_length}}   {instance['Id']:<{max_id_length}}")
+        # print(f"{i + 1:<1}. {name:<{max_name_length}}   {instance['Id']:<{max_id_length}}")
 
     # limit the choice to the number of instances, allow q for quit and c for cancel, also allow keyboard interrupt to quit
     # while the choice is invalid, return to the prompt
