@@ -45,13 +45,9 @@ def select_instance(instances):
     # Rows
     for i, instance in enumerate(instances):
         name = instance.get('Name', 'N/A')
-        # print the instance name, left aligned, padded with spaces to the max_name_length with numbers 1-9 padded accordingly numbers should end with a dot .
         j=str(i+1)+"."
         print(f"{j:<3} {name:<{max_name_length}}   {instance['Id']:<{max_id_length}}")
-        # print(f"{i + 1:<1}. {name:<{max_name_length}}   {instance['Id']:<{max_id_length}}")
 
-    # limit the choice to the number of instances, allow q for quit and c for cancel, also allow keyboard interrupt to quit
-    # while the choice is invalid, return to the prompt
     while True:
         try:
             choice = input(f"Choose an instance (1-{len(instances)}) or q to quit: ") 
