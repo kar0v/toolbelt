@@ -1,116 +1,114 @@
-import contextlib
-import signal
-import subprocess
+import boto3
 import json
-import argparse
-import os
+import subprocess
 
-# Get the AWS profile from the environment variable AWS_PROFILE
-# If it is not set, ask the user to provide it
-parser = argparse.ArgumentParser(description="Provide your AWS profile")
-parser.add_argument('--profile', help='AWS profile to use')
-args = parser.parse_args()
+ec2_client = boto3.client('ec2', region_name='eu-central-1')
+running_instances = ec2_client.describe_instances(
+    Filters=[
+        {'Name': 'instance-state-name', 'Values': ['running']}
+    ]
+)
 
-aws_profile = args.profile or os.environ.get('AWS_PROFILE')
-cmd_profile = f"--profile={aws_profile}" if aws_profile else ""
+# This converts the dict to a string with the correct indentation, so it can be parsed.
+json_data = json.dumps(running_instances, default=str, indent=4)
+parsed_data = json.loads(json_data)  # load data in json
 
-def get_ec2_instances():
+
+# This function checks if a key exists, if not it returns None.
+# Useful, as the key 'Tags' is not always present
+def check_for_key_error(instance, key):
     try:
-        cmd = [
-            "aws", "ec2", "describe-instances",
-            "--filter", "Name=instance-state-name,Values=running",
-            "--region", "eu-central-1",
-            "--query", "Reservations[*].Instances[].{Id:InstanceId, Name:Tags[?Key=='Name'].Value|[0]} | sort_by(@, &Name)",
-            "--output", "json"
-        ]
-        if cmd_profile:
-            cmd.append(cmd_profile)
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        return json.loads(result.stdout)
-    except subprocess.CalledProcessError as e:
-        print(f"Error: {e}")
+        return instance[key]
+    except KeyError:
         return None
 
 
+def get_available_instances_in_region():
+    instances_dict = {}
+    for reservation in parsed_data['Reservations']:
+        for instance in reservation['Instances']:
+            tags = check_for_key_error(instance, 'Tags')
+            instance_id = instance['InstanceId']
+            if tags is not None:
+                for tag in tags:
+                    if tag['Key'] == 'Name':
+                        instance_name = tag['Value']
+                        instances_dict[instance_id] = instance_name
+                        break
+            else:
+                instances_dict[instance_id] = 'Unnamed'
+    return instances_dict
+
 
 def select_instance(instances):
+    instances_sorted = sorted(instances.items(), key=lambda kv: (kv[1], kv[0]))
     # Determine the maximum width for each column
-    max_name_length = max(len(instance.get('Name', 'N/A')) for instance in instances)
-    max_id_length = max(len(instance['Id']) for instance in instances)
+    max_name_length = max(len(instance[1]) for instance in instances_sorted)
+    max_id_length = max(len(instance[0]) for instance in instances_sorted)
 
     # Header
-    print(f"{'#.':<3} {'Name':<{max_name_length}}   {'Instance ID':<{max_id_length}}")
-    print("-" * (3 + max_name_length + max_id_length + 2))
+    print(f"{'#':<3} {'Name':<{max_name_length}}   {
+          'Instance ID':<{max_id_length}}")
+    print("-" * (7 + max_name_length + max_id_length))
 
     # Rows
-    for i, instance in enumerate(instances):
-        name = instance.get('Name', 'N/A')
-        j=str(i+1)+"."
-        print(f"{j:<3} {name:<{max_name_length}}   {instance['Id']:<{max_id_length}}")
+    for i, instance in enumerate(instances_sorted):
+        name = instance[1]
+        j = str(i+1)+"."
+        print(f"{j:<3} {name:<{max_name_length}}   {
+              instance[0]:<{max_id_length}}")
+
+    # Footer
+    print("-" * (7 + max_name_length + max_id_length))
 
     while True:
         try:
-            choice = input(f"Choose an instance (1-{len(instances)}) or q to quit: ") 
-        except KeyboardInterrupt: # catch Ctrl+C
-            print("\nInterrupted by user")
+            choice = input(
+                f"Choose an instance (1-{len(instances)}) or q to quit: ")
+        except KeyboardInterrupt:  # catch Ctrl+C
+            print("\nGoodbye!\n")
             exit()
-        except EOFError: # catch Ctrl+D
-            print("\nInterrupted by user")
+        except EOFError:  # catch Ctrl+D
+            print("\nGoodbye!\n")
             exit()
-        except Exception as e: # catch any other exception
+        except Exception as e:  # catch any other exception
             print(f"Error: {e}")
             exit()
 
         if choice in ["q", "Q"]:
+            print("Goodbye!\n")
             exit()
         try:
-            choice = int(choice) # enforce integer choice within the range of instances
+            # enforce integer choice within the range of instances
+            choice = int(choice)
             if choice < 1 or choice > len(instances):
                 raise ValueError
             break
         except ValueError:
             print("Invalid choice, please try again.")
-    return instances[choice - 1]['Id']
+
+    return instances_sorted[choice - 1][0]
 
 
-@contextlib.contextmanager
-def ignore_user_entered_signals():
-    """
-    Ignores user entered signals to avoid process getting killed.
-    """
-    signal_list = [signal.SIGINT, signal.SIGQUIT, signal.SIGTSTP]
-    actual_signals = []
-    for user_signal in signal_list:
-        actual_signals.append(signal.signal(user_signal, signal.SIG_IGN))
-    try:
-        yield
-    finally:
-        for sig, user_signal in enumerate(signal_list):
-            signal.signal(user_signal, actual_signals[sig])
-            
 def start_ssm_session(instance_id):
     try:
-        with ignore_user_entered_signals():
-            subprocess.run(["aws", "ssm", "start-session", "--target", instance_id])
-    except KeyboardInterrupt: # catch Ctrl+C
+        # Start the session using the AWS CLI
+        subprocess.run(
+            ['aws', 'ssm', 'start-session', '--target', instance_id])
+    except KeyboardInterrupt:  # catch Ctrl+C
         print("\nInterrupted by user")
         exit()
-    except EOFError: # catch Ctrl+D
+    except EOFError:  # catch Ctrl+D
         print("\nInterrupted by user")
         exit()
     except subprocess.CalledProcessError as e:
         print(f"Error: {e}")
+        exit()
 
 def main():
-    instances = get_ec2_instances()
-    if instances:
-        instance_id = select_instance(instances)
-        try:
-            start_ssm_session(instance_id)
-        except Exception as e:
-            print(f"Error: {e}")
-    else:
-        print("No running instances found or an error occurred.")
+    selected_instance = select_instance(get_available_instances_in_region())
+    start_ssm_session(selected_instance)
+
 
 if __name__ == "__main__":
     main()
