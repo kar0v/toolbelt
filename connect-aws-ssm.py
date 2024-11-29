@@ -50,7 +50,7 @@ def get_available_instances_in_region():
 
 
 def select_instance(instances):
-    instances_sorted = sorted(instances.items(), key=lambda kv: (kv[1], kv[0]))
+    instances_sorted = sorted(instances.items(), key=lambda kv: (kv[1].lower(), kv[0].lower()))
     # Determine the maximum width for each column
     max_name_length = max(len(instance[1]) for instance in instances_sorted)
     max_id_length = max(len(instance[0]) for instance in instances_sorted)
