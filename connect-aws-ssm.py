@@ -1,13 +1,22 @@
 import boto3
+import botocore
 import json
 import subprocess
+import signal
+import contextlib
 
-ec2_client = boto3.client('ec2', region_name='eu-central-1')
-running_instances = ec2_client.describe_instances(
-    Filters=[
-        {'Name': 'instance-state-name', 'Values': ['running']}
-    ]
-)
+
+try:
+    ec2_client = boto3.client('ec2', region_name='eu-central-1')
+    running_instances = ec2_client.describe_instances(
+        Filters=[
+            {'Name': 'instance-state-name', 'Values': ['running']}
+        ]
+    )
+except botocore.exceptions.NoCredentialsError as e:
+    print(f"Error: {e}")
+    print("Please configure your AWS credentials")
+    exit()
 
 # This converts the dict to a string with the correct indentation, so it can be parsed.
 json_data = json.dumps(running_instances, default=str, indent=4)
@@ -90,6 +99,22 @@ def select_instance(instances):
     return instances_sorted[choice - 1][0]
 
 
+@contextlib.contextmanager
+def ignore_user_entered_signals():
+    """
+    Ignores user entered signals to avoid process getting killed.
+    """
+    signal_list = [signal.SIGINT, signal.SIGQUIT, signal.SIGTSTP]
+    actual_signals = []
+    for user_signal in signal_list:
+        actual_signals.append(signal.signal(user_signal, signal.SIG_IGN))
+    try:
+        yield
+    finally:
+        for sig, user_signal in enumerate(signal_list):
+            signal.signal(user_signal, actual_signals[sig])
+            
+
 def start_ssm_session(instance_id):
     try:
         # Start the session using the AWS CLI
@@ -105,9 +130,13 @@ def start_ssm_session(instance_id):
         print(f"Error: {e}")
         exit()
 
+
+
 def main():
     selected_instance = select_instance(get_available_instances_in_region())
-    start_ssm_session(selected_instance)
+    with ignore_user_entered_signals():
+        start_ssm_session(selected_instance)
+    
 
 
 if __name__ == "__main__":
