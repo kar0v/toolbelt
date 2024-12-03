@@ -120,9 +120,6 @@ def start_ssm_session(instance_id):
         # Start the session using the AWS CLI
         subprocess.run(
             ['aws', 'ssm', 'start-session', '--target', instance_id])
-    except KeyboardInterrupt:  # catch Ctrl+C
-        print("\nInterrupted by user")
-        exit()
     except EOFError:  # catch Ctrl+D
         print("\nInterrupted by user")
         exit()
